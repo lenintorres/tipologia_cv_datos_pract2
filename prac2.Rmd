@@ -1,0 +1,259 @@
+---
+title: "Práctica 2"
+author: "Lenin Torres"
+date: "1/1/2020"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Descripción del dataset
+El conjunto de datos seleccionado se obtuvo desde https://www.kaggle.com/roshansharma/online-shoppers-intention y de acuerdo a la descripciòn del mismo, contiene datos de 12330 sesiones de usuarios que realizan compras en línea. Este conjunto de datos se selecciona debido a que será interesante explorar modelos que permitan detectar cuales factores contribuyen a que la intención de compra de usuarios de tiendas en línea efectivamente realicen una compra. 
+
+Los atributos del conjunto de datos son los siguientes:
+
+* Los siguientes atributos indican el número de páginas y el tiempo total que el usuario permaneció en tres categorías de página: administrativa, informativa y de producto relacionado.
+  * Administrative, 
+  * Administrative Duration, 
+  * Informational, 
+  * Informational Duration, 
+  * Product Related 
+  * Product Related Duration  
+* Atributos generados con Google Analytics:
+  * Bunce rate. Porcentaje de visitantes que ingresan al sitio usando una página pero que lo abandonan sin realizar ninguna acción adicional
+  * Exit rate: De todas las visitas a la página, el porcentje en el que fue la última en la sesión del usuario. 
+  * Page value: valor promedio de una página visitada antes de haber completado una transaccion.
+* Atributos relacionados con el navegador empleado por el usuario:
+  * OperatingSystems
+  * Browser
+* Traffict type
+* Visitor Type
+* Special day. Indica la cercanía de la visita a una fecha comercial importante, como el día de San Valentín
+* Weekend. Indica si la sesión de usuario se realizo en en fin de semana o no
+* Revenue. Indica si la visita finaliza o no en una transacciòn
+
+El objetivo que se persigue en este trabajo es predecir el valor del atributo  *Revenue* mediante la creación de un modelo. 
+
+# Integración y selección de los datos de interés a analizar.
+Para el caso de esta práctica, se opta por utilizar todos los atributos relacionados para realzar una predicción de la variable *Revenue*, se omiten los atributos relacionados con el navegador empleado
+
+# Limpieza de los datos.
+
+Iniciamos leyendo el archivo y presentando un resumen
+```{r}
+datos <- read.csv(file = "online_shoppers_intention.csv",sep = ",", dec = ".")
+str(datos)
+```
+
+Para facilitar la selecciòn de atributos, se separan en dos estructuras
+```{r}
+atribNumericos = c("Administrative","Administrative_Duration","Informational","Informational_Duration","ProductRelated","ProductRelated_Duration","BounceRates","ExitRates","PageValues")
+atribCategoricos = c("Revenue")
+datos$Revenue = as.factor(datos$Revenue)
+datos = datos[,names(datos) %in% c(atribNumericos,atribCategoricos)]
+```
+
+Se revisa nuevamente el conjunto de datos.
+```{r}
+str(datos)
+```
+
+## Datos perdídos
+
+Primeramente comprobamos si en la lectura algunos datos se marcaron como NA:
+```{r}
+colSums(is.na(datos))
+```
+Se puede observar que existen exactamente 14 ocurrencias en las que se cargaron valores perdídos, esto representa un 0.11% de las observaciones. Examinando algunos ejemplos de estas observaciones, se puede observar que los valores perdídos provienen de las mismas 14 filas:
+```{r}
+datos[is.na(datos$Administrative),]
+```
+En este caso se opta por eliminar los registros del conjunto de datos. 
+```{r}
+datos <- na.omit(datos)
+colSums(is.na(datos))
+```
+Se obtienen algunas estadísticas básicas:
+```{r}
+summary(datos)
+```
+Los valores negativos en algunos atributos de duración tienen valore negativos, lo que no tiene sentido para valores de tiempo, por lo que podría tratarse de un valor que indica que el dato no se registró. Algunos ejemplos de registros son:
+```{r}
+datos[datos$Administrative_Duration <0,]
+```
+Como se puede ver, en muschos de los casos, se tiene un valor 0 para el tipo de pagina y un valor de -1 para la duración. Por lo tanto, se reemplazarán los valores -1 por 0 cunado el tipo de página sea cero:
+```{r}
+datos$Administrative_Duration  <- ifelse(datos$Administrative == 0, 0,datos$Administrative_Duration)
+datos$Informational_Duration <- ifelse(datos$Informational == 0, 0,datos$Informational_Duration)
+datos$ProductRelated_Duration <- ifelse(datos$ProductRelated == 0, 0,datos$ProductRelated_Duration)
+
+summary(datos)
+```
+Existen todavia casos de valores negativos de duración:
+```{r}
+datos[datos$Administrative_Duration <0,]
+datos[datos$ProductRelated_Duration < 0,]
+```
+En estos casos se realizará una imputación de valores, tomando la duraciòn promedio de Administrative cuando toma el valor 1 y de manera similar para el caso de Related Product:
+```{r}
+mediaAdministrativeDuration <- mean(datos$Administrative_Duration[datos$Administrative==1 & datos$Administrative_Duration > 0])
+mediaAdministrativeDuration
+mediaProductRelatedDuration <- mean(datos$ProductRelated_Duration[datos$ProductRelated==1 & datos$ProductRelated_Duration > 0])
+mediaProductRelatedDuration
+```
+```{r}
+datos$Administrative_Duration[datos$Administrative_Duration<0] =mediaAdministrativeDuration
+datos$ProductRelated_Duration[datos$ProductRelated_Duration<0] = mediaProductRelatedDuration
+```
+Se vuelve a examinar el conjnto de datos
+```{r}
+summary(datos)
+```
+
+## Identificación y tratamiento de valores extremos.
+Obtenemos las estadísticas básicas de los atributos del conjunto de datos:
+```{r}
+summary(datos)
+```
+Mediante diagramas de caja y la librería outliers, se pueden analizar los valores que toman las diferentes variables numéricas. 
+
+```{r}
+
+library(outliers)
+for(atributo in atribNumericos){
+  boxplot(datos[,atributo], main=atributo)
+  print(outliers::outlier(x = datos[atributo]))
+}
+
+```
+Como se puede ver, en el caso de la variable *Administrative_Duration*, se tiene un valor extremo de 3398.75:
+```{r}
+datos[datos$Administrative_Duration >= 3000,]
+
+```
+Dado que este valor resulta anormal para el número de páginas administrativas (5) se eliminará el registro, esta eliminaciòn también elimina un valor extremo en la variable *Informational_Duration*
+
+Otros valores muy notorios se dan en la varible *ProductRelated_duration", con una duración superior a los 40000
+```{r}
+datos[datos$ProductRelated_Duration > 30000,]
+```
+Analizando los valores del resto de variables para las dos observaciones, se puede ver que estas dos transacciones ocurren en los meses de Mayo y Diciembre y que obedecen a una gran cantidad de páginas de productos relacionados visitadas, se podría explicar por ser meses relacionados fechas comerciales importantes, como lo son Navidad y día de la Madre. Analizando las observaciones de la variable *ProductRelated_Duration* por mes, se puede ver que incluso considerando que es el mes de diciembre, el valor de ProductRelated_Duration es muy alto incluso en función de las páginas visitadas:
+
+
+Se decide eliminar el registro con duración de más de 63000 
+```{r}
+datos <- datos[datos$ProductRelated_Duration < 63000,]
+```
+
+Para analizar el efecto de esta eliminaciòn, se analiza de nuevo las estadísticas básicas del conjunto de datos
+```{r}
+summary(datos)
+```
+
+# Análisis de los datos.
+## Grupos de datos
+Par
+
+
+## Comprobación de la normalidad y homogeneidad de la varianza.
+En primer lugar, se realiza una inspecciòn visual mediante la generación de histogramas para los diferentes atributos numéricos. 
+
+```{r}
+
+for(atributo in atribNumericos){
+  hist(datos[,atributo],probability = T, main = paste("Histograma de atributo " , atributo), xlab = atributo )
+  lines(density(datos[,atributo]))
+}
+ 
+```
+
+La inspección visual sugiere que las variables no tienen una distribución normal, para comprobarlo se ejecuta una prueba Shapiro-Wilk para cada una de ellas. Se tomará una muestra de 5000 registros:
+
+```{r}
+set.seed(202)
+muestra <- dplyr::sample_n(datos,5000)
+for(atributo in atribNumericos){
+  valor_p = shapiro.test(muestra[,atributo])$p.value
+  if(valor_p < 0.05){
+    print(paste(atributo," no tiene una distribución normal, ","valor p:",valor_p)) 
+  }
+  else{
+    print(paste(atributo," tiene una distribución normal, ","valor p:",valor_p))
+  }
+}
+```
+
+## Pruebas estadísticas
+> Aplicación de pruebas estadísticas para comparar los grupos de datos. En función de los datos y el objetivo del estudio, aplicar pruebas de contraste de hipótesis, correlaciones, regresiones, etc. Aplicar al menos tres métodos de análisis diferentes.
+
+### Análisis de la correlación de las variables seleccionadas con el resultado 
+
+El siguiente análisis de correlación se realiza utilizando la prueba de Spearman ya que se ha determinado que los valores no siguen una distribución normal. 
+
+```{r}
+
+kruskal.test(data=datos, Informational~Revenue)
+kruskal.test(data=datos, Informational_Duration~Revenue)
+kruskal.test(data=datos, Administrative~Revenue)
+kruskal.test(data=datos, Administrative_Duration~Revenue)
+kruskal.test(data=datos, ProductRelated~Revenue)
+kruskal.test(data=datos, ProductRelated_Duration~Revenue)
+
+```
+
+```{r}
+library("Hmisc")
+res2 <- rcorr(as.matrix(datos[names(datos) %in% c(atribNumericos)]))
+res2
+```
+
+# Predicción
+Se plantea utilizar un modelo de regresión logística para predecir si un visitante realizará o no una compra, es decir si la variable *Revenue* tendrá un valor Verdadero. 
+
+Se divide el conjunto de datos en un conjunto de entrenamiento y uno de prueba:
+```{r}
+library(caTools)
+set.seed(123)
+datosSelec = datos
+split = sample.split(datosSelec$Revenue, SplitRatio = 0.75)
+training_set = subset(datosSelec, split == TRUE)
+test_set = subset(datosSelec, split == FALSE)
+#La ultima columna es la variable dependiente
+ultimaCol = dim(training_set)[2]
+```
+Seguidamente realizamos una normalizacion de los datos para las variables numéricas.
+```{r}
+
+for(atributo in atribNumericos){
+  training_set[,atributo] = scale(training_set[,atributo])
+  test_set[,atributo] = scale(test_set[,atributo])
+}
+```
+
+Creamos el clasificador
+```{r}
+classifier = glm(formula = Revenue ~ .,
+                 family = binomial,
+                 data = training_set)
+```
+
+Se realiza la predicción
+```{r}
+prob_pred = predict(classifier, type = 'response', newdata = test_set[-ultimaCol])
+y_pred = ifelse(prob_pred > 0.5, T, F)
+```
+Se analiza el resultado en con una matriz de confusion
+```{r}
+cm = table(test_set[, ultimaCol], y_pred)
+cm
+```
+
+# Representación de los resultados a partir de tablas y gráficas.
+
+# Resolución del problema. 
+Con el modelo creado se puede realizar una predicción correcta del 88% (2731 de 3079 casos) de casos usando las variables seleccionadas.
