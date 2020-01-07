@@ -1,4 +1,4 @@
-# Práctica 1: Web scraping
+# Práctica 2
 
 ## Descripción
 
